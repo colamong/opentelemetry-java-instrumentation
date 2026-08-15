@@ -8,6 +8,7 @@ package io.opentelemetry.javaagent.instrumentation.kafkaconnect.v2_6;
 import static io.opentelemetry.instrumentation.api.incubator.semconv.messaging.internal.MessagingExceptionEventExtractors.setMessagingProcessExceptionEventExtractor;
 import static io.opentelemetry.instrumentation.api.internal.SemconvStability.emitStableMessagingSemconv;
 import static io.opentelemetry.semconv.ErrorAttributes.ERROR_TYPE;
+import static io.opentelemetry.semconv.incubating.MessagingIncubatingAttributes.MESSAGING_BATCH_MESSAGE_COUNT;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
@@ -48,7 +49,7 @@ public class KafkaConnectSingletons {
           public Context onStart(Context context, Attributes startAttributes, long startNanos) {
             KafkaConnectDeliveryTracker.DeliveryState state =
                 context.get(CONSUMED_MESSAGES_DELIVERY_STATE);
-            return state != null && state.shouldCountConsumedMessages()
+            return state != null && state.getConsumedMessagesCount() > 0
                 ? delegate.onStart(context, startAttributes, startNanos)
                 : context;
           }
@@ -69,8 +70,13 @@ public class KafkaConnectSingletons {
             if (state == null) {
               return;
             }
-            if (state.shouldCountConsumedMessages()) {
-              delegate.onEnd(context, endAttributes, endNanos);
+            if (state.getConsumedMessagesCount() > 0) {
+              delegate.onEnd(
+                  context,
+                  endAttributes.toBuilder()
+                      .put(MESSAGING_BATCH_MESSAGE_COUNT, state.getConsumedMessagesCount())
+                      .build(),
+                  endNanos);
             }
             deliveryTracker.end(state, successful);
           }

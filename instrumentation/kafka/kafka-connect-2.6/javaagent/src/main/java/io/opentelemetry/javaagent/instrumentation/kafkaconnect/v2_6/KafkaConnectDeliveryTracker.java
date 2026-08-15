@@ -7,7 +7,6 @@ package io.opentelemetry.javaagent.instrumentation.kafkaconnect.v2_6;
 
 import io.opentelemetry.instrumentation.api.internal.cache.Cache;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import org.apache.kafka.connect.sink.SinkRecord;
 
@@ -20,29 +19,33 @@ class KafkaConnectDeliveryTracker {
   KafkaConnectDeliveryTracker() {}
 
   DeliveryState start(KafkaConnectTask task) {
-    String deliveryKey = deliveryKey(task);
+    List<String> deliveryKeys = deliveryKeys(task);
     Cache<String, Boolean> taskPendingFailedDeliveries =
         pendingFailedDeliveries.computeIfAbsent(
             task.getTaskIdentity(), unused -> Cache.bounded(MAX_PENDING_FAILED_DELIVERIES));
     return new DeliveryState(
-        deliveryKey,
+        deliveryKeys,
         taskPendingFailedDeliveries,
-        taskPendingFailedDeliveries.get(deliveryKey) == null);
+        deliveryKeys.stream()
+            .filter(deliveryKey -> taskPendingFailedDeliveries.get(deliveryKey) == null)
+            .count());
   }
 
   void end(DeliveryState state, boolean successful) {
-    if (successful) {
-      state.pendingFailedDeliveries.remove(state.deliveryKey);
-    } else {
-      state.pendingFailedDeliveries.put(state.deliveryKey, true);
+    for (String deliveryKey : state.deliveryKeys) {
+      if (successful) {
+        state.pendingFailedDeliveries.remove(deliveryKey);
+      } else {
+        state.pendingFailedDeliveries.put(deliveryKey, true);
+      }
     }
   }
 
-  private static String deliveryKey(KafkaConnectTask task) {
-    List<String> positions = new ArrayList<>();
+  private static List<String> deliveryKeys(KafkaConnectTask task) {
+    List<String> deliveryKeys = new ArrayList<>();
     for (SinkRecord record : task.getRecords()) {
       String topic = record.topic();
-      positions.add(
+      deliveryKeys.add(
           topic.length()
               + ":"
               + topic
@@ -51,31 +54,25 @@ class KafkaConnectDeliveryTracker {
               + ":"
               + record.kafkaOffset());
     }
-    Collections.sort(positions);
-
-    StringBuilder key = new StringBuilder();
-    for (String position : positions) {
-      key.append(position).append('|');
-    }
-    return key.toString();
+    return deliveryKeys;
   }
 
   static class DeliveryState {
-    private final String deliveryKey;
+    private final List<String> deliveryKeys;
     private final Cache<String, Boolean> pendingFailedDeliveries;
-    private final boolean countConsumedMessages;
+    private final long consumedMessagesCount;
 
     private DeliveryState(
-        String deliveryKey,
+        List<String> deliveryKeys,
         Cache<String, Boolean> pendingFailedDeliveries,
-        boolean countConsumedMessages) {
-      this.deliveryKey = deliveryKey;
+        long consumedMessagesCount) {
+      this.deliveryKeys = deliveryKeys;
       this.pendingFailedDeliveries = pendingFailedDeliveries;
-      this.countConsumedMessages = countConsumedMessages;
+      this.consumedMessagesCount = consumedMessagesCount;
     }
 
-    boolean shouldCountConsumedMessages() {
-      return countConsumedMessages;
+    long getConsumedMessagesCount() {
+      return consumedMessagesCount;
     }
   }
 }

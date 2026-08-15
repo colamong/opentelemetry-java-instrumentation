@@ -66,6 +66,32 @@ class KafkaConnectDeliveryTrackerTest {
   }
 
   @Test
+  void countsSubsetRetryOnce() {
+    SinkRecord first = sinkRecord("subsetTopic", 0, 10);
+    SinkRecord second = sinkRecord("subsetTopic", 0, 11);
+    RetryingSinkTask task = new RetryingSinkTask(1);
+
+    assertThatThrownBy(() -> task.put(asList(first, second)))
+        .isInstanceOf(RetriableException.class);
+    task.put(singletonList(second));
+
+    assertTotalConsumedMessages(testing, "io.opentelemetry.kafka-connect-2.6", 2);
+  }
+
+  @Test
+  void countsRetryCombinedWithNewRecordOnce() {
+    SinkRecord retried = sinkRecord("combinedTopic", 0, 10);
+    SinkRecord newRecord = sinkRecord("combinedTopic", 0, 11);
+    RetryingSinkTask task = new RetryingSinkTask(1);
+
+    assertThatThrownBy(() -> task.put(singletonList(retried)))
+        .isInstanceOf(RetriableException.class);
+    task.put(asList(retried, newRecord));
+
+    assertTotalConsumedMessages(testing, "io.opentelemetry.kafka-connect-2.6", 2);
+  }
+
+  @Test
   @SuppressWarnings("unchecked")
   void receiveOperationCountsRetriedBatchOnce() {
     String instrumentationName = "test-kafka-connect-receive";
