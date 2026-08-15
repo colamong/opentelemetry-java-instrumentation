@@ -7,6 +7,9 @@ package io.opentelemetry.instrumentation.kafkaconnect.v2_6;
 
 import static io.opentelemetry.instrumentation.api.internal.SemconvStability.emitOldMessagingSemconv;
 import static io.opentelemetry.instrumentation.api.internal.SemconvStability.emitStableMessagingSemconv;
+import static io.opentelemetry.instrumentation.testing.junit.messaging.KafkaMessagingMetricsAssertions.assertProcessMetrics;
+import static io.opentelemetry.instrumentation.testing.junit.messaging.KafkaMessagingMetricsAssertions.assertProcessMetricsWithConsumedMessages;
+import static io.opentelemetry.instrumentation.testing.junit.messaging.KafkaMessagingMetricsAssertions.assertReceiveMetrics;
 import static io.opentelemetry.instrumentation.testing.util.TelemetryDataUtil.groupTraces;
 import static io.opentelemetry.sdk.testing.assertj.OpenTelemetryAssertions.equalTo;
 import static io.opentelemetry.sdk.testing.assertj.OpenTelemetryAssertions.satisfies;
@@ -96,6 +99,9 @@ import org.testcontainers.utility.MountableFile;
 @DisabledIf("io.opentelemetry.smoketest.TestContainerManager#useWindowsContainers")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 abstract class KafkaConnectSinkTaskBaseTest implements TelemetryRetrieverProvider {
+
+  private static final boolean RECEIVE_TELEMETRY_ENABLED =
+      Boolean.getBoolean("otel.instrumentation.messaging.experimental.receive-telemetry.enabled");
 
   @RegisterExtension
   protected static final InstrumentationExtension testing =
@@ -188,6 +194,8 @@ abstract class KafkaConnectSinkTaskBaseTest implements TelemetryRetrieverProvide
                   trace ->
                       trace.stream()
                           .anyMatch(span -> span.getName().contains("kafka-connect-status")));
+              traces.removeIf(
+                  trace -> trace.size() == 1 && trace.get(0).getName().equals("GET /connectors"));
               TracesAssert.assertThat(traces).hasTracesSatisfyingExactly(asList(assertions));
             });
   }
@@ -333,6 +341,25 @@ abstract class KafkaConnectSinkTaskBaseTest implements TelemetryRetrieverProvide
     return spanContext.getTraceId() + spanContext.getSpanId();
   }
 
+  protected void assertSingleMessageMetrics(String destination) {
+    if (RECEIVE_TELEMETRY_ENABLED) {
+      assertProcessMetrics(
+          testing, "io.opentelemetry.kafka-connect-2.6", destination, null, null, 1, null);
+      assertReceiveMetrics(
+          testing,
+          "io.opentelemetry.kafka-clients-0.11",
+          destination,
+          "connect-" + getConnectorName(),
+          null,
+          1,
+          1,
+          null);
+    } else {
+      assertProcessMetricsWithConsumedMessages(
+          testing, "io.opentelemetry.kafka-connect-2.6", destination, null, null, 1, 1, null);
+    }
+  }
+
   @Override
   public TelemetryRetriever getTelemetryRetriever() {
     return telemetryRetriever;
@@ -470,13 +497,16 @@ abstract class KafkaConnectSinkTaskBaseTest implements TelemetryRetrieverProvide
             // Disable test exporter and force OTLP exporter
             .withEnv("OTEL_TESTING_EXPORTER_ENABLED", "false")
             .withEnv("OTEL_TRACES_EXPORTER", "otlp")
-            .withEnv("OTEL_METRICS_EXPORTER", "none")
+            .withEnv("OTEL_METRICS_EXPORTER", "otlp")
             .withEnv("OTEL_LOGS_EXPORTER", "none")
             .withEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://" + BACKEND_ALIAS + ":" + BACKEND_PORT)
             .withEnv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
             .withEnv("OTEL_BSP_MAX_EXPORT_BATCH_SIZE", "1")
             .withEnv("OTEL_BSP_SCHEDULE_DELAY", "10ms")
-            .withEnv("OTEL_METRIC_EXPORT_INTERVAL", "1000")
+            // the backend accumulates every export, and the retriever stops polling only once the
+            // accumulated payload stops growing, so exporting metrics faster than it polls would
+            // keep the payload growing until it exceeds the retriever's content length limit
+            .withEnv("OTEL_METRIC_EXPORT_INTERVAL", "10000")
             .withEnv(
                 "OTEL_SEMCONV_STABILITY_OPT_IN",
                 emitStableMessagingSemconv()
@@ -516,6 +546,8 @@ abstract class KafkaConnectSinkTaskBaseTest implements TelemetryRetrieverProvide
     StringBuilder options =
         new StringBuilder("-javaagent:/opentelemetry-javaagent.jar -Dotel.javaagent.debug=true");
     appendSystemProperty(options, "otel.semconv-stability.preview");
+    appendSystemProperty(
+        options, "otel.instrumentation.messaging.experimental.receive-telemetry.enabled");
     return options.toString();
   }
 

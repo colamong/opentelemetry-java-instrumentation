@@ -5,6 +5,7 @@
 
 package io.opentelemetry.javaagent.instrumentation.kafkaconnect.v2_6;
 
+import static io.opentelemetry.instrumentation.api.internal.SemconvStability.emitStableMessagingSemconv;
 import static io.opentelemetry.javaagent.extension.matcher.AgentElementMatchers.hasClassesNamed;
 import static io.opentelemetry.javaagent.instrumentation.kafkaconnect.v2_6.KafkaConnectSingletons.instrumenter;
 import static net.bytebuddy.matcher.ElementMatchers.hasSuperType;
@@ -22,6 +23,7 @@ import net.bytebuddy.asm.Advice;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
 import org.apache.kafka.connect.sink.SinkRecord;
+import org.apache.kafka.connect.sink.SinkTask;
 
 class SinkTaskInstrumentation implements TypeInstrumentation {
 
@@ -57,10 +59,18 @@ class SinkTaskInstrumentation implements TypeInstrumentation {
       }
 
       @Nullable
-      public static AdviceScope start(Collection<SinkRecord> records) {
+      public static AdviceScope start(Collection<SinkRecord> records, SinkTask sinkTask) {
+        // Kafka Connect calls put() on every worker iteration, including when the preceding poll
+        // returned nothing. An empty batch processes no message, so under stable/v3 semconv it is
+        // not recorded at all, matching kafka-clients, which attaches no process context to an
+        // empty poll. Legacy behavior is preserved: it kept spanning empty batches.
+        if (records.isEmpty() && emitStableMessagingSemconv()) {
+          return null;
+        }
+
         Context parentContext = Context.current();
 
-        KafkaConnectTask task = new KafkaConnectTask(records);
+        KafkaConnectTask task = new KafkaConnectTask(records, sinkTask);
         if (!instrumenter().shouldStart(parentContext, task)) {
           return null;
         }
@@ -77,8 +87,9 @@ class SinkTaskInstrumentation implements TypeInstrumentation {
 
     @Nullable
     @Advice.OnMethodEnter(suppress = Throwable.class, inline = false)
-    public static AdviceScope onEnter(@Advice.Argument(0) Collection<SinkRecord> records) {
-      return AdviceScope.start(records);
+    public static AdviceScope onEnter(
+        @Advice.Argument(0) Collection<SinkRecord> records, @Advice.This SinkTask sinkTask) {
+      return AdviceScope.start(records, sinkTask);
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class, inline = false)

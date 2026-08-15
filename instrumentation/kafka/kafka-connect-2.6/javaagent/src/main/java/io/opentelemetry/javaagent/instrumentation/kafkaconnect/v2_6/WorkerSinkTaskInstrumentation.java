@@ -10,9 +10,12 @@ import static net.bytebuddy.matcher.ElementMatchers.named;
 import io.opentelemetry.javaagent.bootstrap.kafka.KafkaClientsConsumerProcessTracing;
 import io.opentelemetry.javaagent.extension.instrumentation.TypeInstrumentation;
 import io.opentelemetry.javaagent.extension.instrumentation.TypeTransformer;
+import javax.annotation.Nullable;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.connect.sink.SinkRecord;
 
 /**
  * This instrumentation is responsible for suppressing the underlying Kafka client consumer spans to
@@ -31,6 +34,9 @@ class WorkerSinkTaskInstrumentation implements TypeInstrumentation {
   public void transform(TypeTransformer transformer) {
     // Instrument the execute method which contains the main polling loop
     transformer.applyAdviceToMethod(named("execute"), getClass().getName() + "$ExecuteAdvice");
+    transformer.applyAdviceToMethod(
+        named("convertAndTransformRecord"),
+        getClass().getName() + "$ConvertAndTransformRecordAdvice");
   }
 
   // This advice suppresses the CONSUMER spans created by the kafka-clients instrumentation
@@ -45,6 +51,25 @@ class WorkerSinkTaskInstrumentation implements TypeInstrumentation {
     @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class, inline = false)
     public static void onExit(@Advice.Enter boolean previousValue) {
       KafkaClientsConsumerProcessTracing.setWrappingEnabled(previousValue);
+    }
+  }
+
+  @SuppressWarnings("unused")
+  public static class ConvertAndTransformRecordAdvice {
+
+    @Advice.OnMethodExit(suppress = Throwable.class, inline = false)
+    public static void onExit(
+        @Advice.AllArguments Object[] arguments,
+        @Advice.Return @Nullable SinkRecord transformedRecord) {
+      if (transformedRecord == null) {
+        return;
+      }
+      for (Object argument : arguments) {
+        if (argument instanceof ConsumerRecord) {
+          KafkaConnectTask.copyReceiveOperation((ConsumerRecord<?, ?>) argument, transformedRecord);
+          return;
+        }
+      }
     }
   }
 }

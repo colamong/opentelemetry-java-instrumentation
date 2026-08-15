@@ -50,6 +50,20 @@ tasks {
     systemProperty("metadataConfig", "otel.semconv-stability.preview=messaging")
   }
 
+  val testMessagingPreviewReceiveTelemetry = register<Test>("testMessagingPreviewReceiveTelemetry") {
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    filter {
+      includeTestsMatching("MongoKafkaConnectSinkTaskTest.testSingleMessage")
+    }
+    jvmArgs("-Dotel.instrumentation.messaging.experimental.receive-telemetry.enabled=true")
+    jvmArgs("-Dotel.semconv-stability.preview=messaging")
+    systemProperty(
+      "metadataConfig",
+      "otel.instrumentation.messaging.experimental.receive-telemetry.enabled=true,otel.semconv-stability.preview=messaging",
+    )
+  }
+
   val testBothSemconv = register<Test>("testBothSemconv") {
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
@@ -58,6 +72,6 @@ tasks {
   }
 
   check {
-    dependsOn(testStableSemconv, testMessagingPreview, testBothSemconv)
+    dependsOn(testStableSemconv, testMessagingPreview, testMessagingPreviewReceiveTelemetry, testBothSemconv)
   }
 }

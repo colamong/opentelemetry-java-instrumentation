@@ -37,6 +37,7 @@ import io.opentelemetry.instrumentation.api.instrumenter.OperationMetrics;
 import io.opentelemetry.instrumentation.api.instrumenter.SpanKindExtractor;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import javax.annotation.Nullable;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
@@ -382,6 +383,27 @@ public final class KafkaInstrumenterFactory {
       index++;
     }
     return consumedMessagesCount;
+  }
+
+  /**
+   * Returns a callback that marks the delivery of the given record as failed or successful, so that
+   * a redelivery after a failure is not counted again by the receive operation.
+   *
+   * <p>The returned callback is a JDK type on purpose. Instrumentation helper classes are injected
+   * per classloader, so a Kafka Connect sink task running in a plugin classloader would otherwise
+   * update a separate copy of the delivery tracking state than the one the kafka-clients receive
+   * operation reads.
+   */
+  public static Consumer<Boolean> createDeliveryTracker(
+      OpenTelemetry openTelemetry,
+      KafkaConsumerContext consumerContext,
+      ConsumerRecord<?, ?> record) {
+    DeliveryTracker deliveryTracker = consumerContext.getDeliveryTracker();
+    if (deliveryTracker == null) {
+      return ignored -> {};
+    }
+    DeliveryTracker.DeliveryState state = deliveryTracker.start(singletonList(deliveryKey(record)));
+    return successful -> endDeliveryTracking(state, successful);
   }
 
   /**

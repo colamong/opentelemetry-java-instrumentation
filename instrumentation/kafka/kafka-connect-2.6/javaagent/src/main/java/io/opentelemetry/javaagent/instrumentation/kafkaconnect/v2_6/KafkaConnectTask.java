@@ -7,19 +7,36 @@ package io.opentelemetry.javaagent.instrumentation.kafkaconnect.v2_6;
 
 import static java.util.stream.Collectors.toCollection;
 
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.instrumentation.api.util.VirtualField;
+import io.opentelemetry.instrumentation.kafkaclients.common.v0_11.internal.KafkaConsumerContext;
+import io.opentelemetry.instrumentation.kafkaclients.common.v0_11.internal.KafkaConsumerContextUtil;
+import io.opentelemetry.instrumentation.kafkaclients.common.v0_11.internal.KafkaInstrumenterFactory;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 import javax.annotation.Nullable;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.connect.sink.SinkRecord;
 
 public class KafkaConnectTask {
 
+  // A JDK type is used as the field type because sink tasks run in a Kafka Connect plugin
+  // classloader, which has its own copies of the instrumentation helper classes.
+  private static final VirtualField<SinkRecord, Consumer<Boolean>> receiveDeliveryField =
+      VirtualField.find(SinkRecord.class, Consumer.class);
+
   private final Collection<SinkRecord> records;
   @Nullable private KafkaConnectBatchRecordAttributes batchRecordAttributes;
+  private final Object taskIdentity;
 
-  public KafkaConnectTask(Collection<SinkRecord> records) {
+  public KafkaConnectTask(Collection<SinkRecord> records, Object taskIdentity) {
     this.records = records;
+    this.taskIdentity = taskIdentity;
   }
 
   public Collection<SinkRecord> getRecords() {
@@ -33,6 +50,44 @@ public class KafkaConnectTask {
       batchRecordAttributes = KafkaConnectBatchRecordAttributes.create(records);
     }
     return batchRecordAttributes;
+  }
+
+  Object getTaskIdentity() {
+    return taskIdentity;
+  }
+
+  public static void copyReceiveOperation(ConsumerRecord<?, ?> source, SinkRecord target) {
+    KafkaConsumerContext consumerContext = KafkaConsumerContextUtil.get(source);
+    Context context = consumerContext.getContext();
+    if (context != null && KafkaConsumerContextUtil.hasReceiveOperation(context)) {
+      receiveDeliveryField.set(
+          target,
+          KafkaInstrumenterFactory.createDeliveryTracker(
+              GlobalOpenTelemetry.get(), consumerContext, source));
+    }
+  }
+
+  boolean wasCountedByReceiveOperation() {
+    if (records.isEmpty()) {
+      return false;
+    }
+    for (SinkRecord record : records) {
+      if (receiveDeliveryField.get(record) == null) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  List<Consumer<Boolean>> getReceiveDeliveryTrackers() {
+    List<Consumer<Boolean>> trackers = new ArrayList<>();
+    for (SinkRecord record : records) {
+      Consumer<Boolean> tracker = receiveDeliveryField.get(record);
+      if (tracker != null) {
+        trackers.add(tracker);
+      }
+    }
+    return trackers;
   }
 
   private Set<String> getTopics() {
