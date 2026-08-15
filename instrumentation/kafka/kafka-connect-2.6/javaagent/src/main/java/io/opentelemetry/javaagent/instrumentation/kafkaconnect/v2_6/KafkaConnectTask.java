@@ -27,7 +27,7 @@ public class KafkaConnectTask {
 
   // A JDK type is used as the field type because sink tasks run in a Kafka Connect plugin
   // classloader, which has its own copies of the instrumentation helper classes.
-  private static final VirtualField<SinkRecord, Consumer<Boolean>> receiveDeliveryField =
+  private static final VirtualField<SinkRecord, Consumer<Boolean>> RECEIVE_DELIVERY_FIELD =
       VirtualField.find(SinkRecord.class, Consumer.class);
 
   private final Collection<SinkRecord> records;
@@ -60,7 +60,7 @@ public class KafkaConnectTask {
     KafkaConsumerContext consumerContext = KafkaConsumerContextUtil.get(source);
     Context context = consumerContext.getContext();
     if (context != null && KafkaConsumerContextUtil.hasReceiveOperation(context)) {
-      receiveDeliveryField.set(
+      RECEIVE_DELIVERY_FIELD.set(
           target,
           KafkaInstrumenterFactory.createDeliveryTracker(
               GlobalOpenTelemetry.get(), consumerContext, source));
@@ -72,7 +72,7 @@ public class KafkaConnectTask {
       return false;
     }
     for (SinkRecord record : records) {
-      if (receiveDeliveryField.get(record) == null) {
+      if (RECEIVE_DELIVERY_FIELD.get(record) == null) {
         return false;
       }
     }
@@ -82,7 +82,7 @@ public class KafkaConnectTask {
   List<Consumer<Boolean>> getReceiveDeliveryTrackers() {
     List<Consumer<Boolean>> trackers = new ArrayList<>();
     for (SinkRecord record : records) {
-      Consumer<Boolean> tracker = receiveDeliveryField.get(record);
+      Consumer<Boolean> tracker = RECEIVE_DELIVERY_FIELD.get(record);
       if (tracker != null) {
         trackers.add(tracker);
       }
