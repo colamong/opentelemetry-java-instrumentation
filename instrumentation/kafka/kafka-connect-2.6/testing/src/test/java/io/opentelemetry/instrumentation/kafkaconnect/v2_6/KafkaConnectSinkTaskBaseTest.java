@@ -10,7 +10,6 @@ import static io.opentelemetry.instrumentation.api.internal.SemconvStability.emi
 import static io.opentelemetry.instrumentation.testing.junit.messaging.KafkaMessagingMetricsAssertions.assertProcessMetrics;
 import static io.opentelemetry.instrumentation.testing.junit.messaging.KafkaMessagingMetricsAssertions.assertProcessMetricsWithConsumedMessages;
 import static io.opentelemetry.instrumentation.testing.junit.messaging.KafkaMessagingMetricsAssertions.assertReceiveMetrics;
-import static io.opentelemetry.instrumentation.testing.util.TelemetryDataUtil.groupTraces;
 import static io.opentelemetry.sdk.testing.assertj.OpenTelemetryAssertions.equalTo;
 import static io.opentelemetry.sdk.testing.assertj.OpenTelemetryAssertions.satisfies;
 import static io.opentelemetry.semconv.incubating.MessagingIncubatingAttributes.MESSAGING_BATCH_MESSAGE_COUNT;
@@ -50,7 +49,6 @@ import io.opentelemetry.instrumentation.testing.junit.InstrumentationExtension;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.testing.assertj.AttributeAssertion;
 import io.opentelemetry.sdk.testing.assertj.TraceAssert;
-import io.opentelemetry.sdk.testing.assertj.TracesAssert;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.data.LinkData;
 import io.opentelemetry.sdk.trace.data.SpanData;
@@ -62,6 +60,7 @@ import io.restassured.http.ContentType;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -178,26 +177,22 @@ abstract class KafkaConnectSinkTaskBaseTest implements TelemetryRetrieverProvide
     await()
         .atMost(Duration.ofSeconds(60))
         .untilAsserted(
-            () -> {
-              List<List<SpanData>> traces = groupTraces(testing.spans());
-              // Stable receive spans are separate traces, and Kafka Connect writes status records
-              // on its own schedule. Neither is relevant to the sink-task assertions.
-              if (emitStableMessagingSemconv()) {
-                traces.removeIf(
+            () ->
+                testing.waitAndAssertSortedTraces(
                     trace ->
-                        trace.size() == 1
-                            && trace.get(0).getKind() == SpanKind.CLIENT
-                            && (trace.get(0).getName().equals("poll")
-                                || trace.get(0).getName().startsWith("poll ")));
-              }
-              traces.removeIf(
-                  trace ->
-                      trace.stream()
-                          .anyMatch(span -> span.getName().contains("kafka-connect-status")));
-              traces.removeIf(
-                  trace -> trace.size() == 1 && trace.get(0).getName().equals("GET /connectors"));
-              TracesAssert.assertThat(traces).hasTracesSatisfyingExactly(asList(assertions));
-            });
+                        !(emitStableMessagingSemconv()
+                                && trace.size() == 1
+                                && trace.get(0).getKind() == SpanKind.CLIENT
+                                && (trace.get(0).getName().equals("poll")
+                                    || trace.get(0).getName().startsWith("poll ")))
+                            && trace.stream()
+                                .noneMatch(span -> span.getName().contains("kafka-connect-status"))
+                            && !(trace.size() == 1
+                                && trace.get(0).getName().equals("GET /connectors")),
+                    Comparator.comparingLong(
+                        trace ->
+                            trace.stream().mapToLong(SpanData::getStartEpochNanos).min().orElse(0)),
+                    assertions));
   }
 
   protected final void waitAndAssertMultiTopicTraces(
