@@ -474,6 +474,11 @@ abstract class KafkaConnectSinkTaskBaseTest implements TelemetryRetrieverProvide
       throw new IllegalStateException(
           "Agent path not found. Make sure the shadowJar task is configured correctly.");
     }
+    String retrySinkConnectorPath =
+        System.getProperty("io.opentelemetry.kafka-connect.retry-sink-connector.path");
+    if (retrySinkConnectorPath == null) {
+      throw new IllegalStateException("Retry sink connector path not found.");
+    }
 
     kafkaConnect =
         new GenericContainer<>("confluentinc/cp-kafka-connect:" + CONFLUENT_VERSION)
@@ -487,6 +492,9 @@ abstract class KafkaConnectSinkTaskBaseTest implements TelemetryRetrieverProvide
             // Copy the agent jar to the container
             .withCopyFileToContainer(
                 MountableFile.forHostPath(agentPath), "/opentelemetry-javaagent.jar")
+            .withCopyFileToContainer(
+                MountableFile.forHostPath(retrySinkConnectorPath),
+                "/usr/share/java/retry-sink-connector.jar")
             // Configure the agent to export spans to backend (like smoke tests)
             .withEnv("JAVA_TOOL_OPTIONS", javaToolOptions())
             // Disable test exporter and force OTLP exporter

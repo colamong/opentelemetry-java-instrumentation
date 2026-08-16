@@ -8,12 +8,19 @@ otelJava {
 }
 
 val agentShadowJar = project(":javaagent").tasks.named<Jar>("shadowJar")
+val retrySinkConnectorJar = tasks.register<Jar>("retrySinkConnectorJar") {
+  archiveFileName.set("retry-sink-connector.jar")
+  from(sourceSets.test.get().output) {
+    include("io/opentelemetry/instrumentation/kafkaconnect/v2_6/RetrySinkConnector*.class")
+  }
+}
 
 dependencies {
   testImplementation(project(":smoke-tests"))
   testImplementation("io.opentelemetry.javaagent:opentelemetry-testing-common")
   testImplementation("io.opentelemetry:opentelemetry-sdk-testing")
   testImplementation("org.apache.kafka:kafka-clients:3.6.1")
+  testImplementation("org.apache.kafka:connect-api:3.6.1")
   testImplementation("io.opentelemetry:opentelemetry-exporter-logging")
   testImplementation("io.opentelemetry:opentelemetry-exporter-otlp")
   testImplementation(project(":instrumentation:kafka:kafka-clients:kafka-clients-2.6:library"))
@@ -29,9 +36,10 @@ dependencies {
 }
 
 tasks.withType<Test>().configureEach {
-  dependsOn(agentShadowJar)
+  dependsOn(agentShadowJar, retrySinkConnectorJar)
   usesService(gradle.sharedServices.registrations["testcontainersBuildService"].service)
   systemProperty("io.opentelemetry.smoketest.agent.shadowJar.path", agentShadowJar.get().archiveFile.get().toString())
+  systemProperty("io.opentelemetry.kafka-connect.retry-sink-connector.path", retrySinkConnectorJar.get().archiveFile.get().toString())
   systemProperty("collectMetadata", otelProps.collectMetadata)
 }
 
@@ -55,6 +63,7 @@ tasks {
     classpath = sourceSets.test.get().runtimeClasspath
     filter {
       includeTestsMatching("MongoKafkaConnectSinkTaskTest.testSingleMessage")
+      includeTestsMatching("RetryKafkaConnectSinkTaskTest")
     }
     jvmArgs("-Dotel.instrumentation.messaging.experimental.receive-telemetry.enabled=true")
     jvmArgs("-Dotel.semconv-stability.preview=messaging")
