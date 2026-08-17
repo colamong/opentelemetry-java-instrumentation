@@ -17,6 +17,7 @@ import static org.mockito.Mockito.mock;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.instrumentation.api.instrumenter.Instrumenter;
+import io.opentelemetry.instrumentation.api.util.VirtualField;
 import io.opentelemetry.instrumentation.kafkaclients.common.v0_11.internal.KafkaConsumerContext;
 import io.opentelemetry.instrumentation.kafkaclients.common.v0_11.internal.KafkaConsumerContextUtil;
 import io.opentelemetry.instrumentation.kafkaclients.common.v0_11.internal.KafkaInstrumenterFactory;
@@ -93,16 +94,27 @@ class KafkaConnectDeliveryTrackerTest {
 
   @Test
   @SuppressWarnings("unchecked")
-  void receiveOperationCountsRetriedBatchOnce() {
+  void receiveOperationCountsFailedSinkDeliveryOnce() {
     String instrumentationName = "test-kafka-connect-receive";
     Instrumenter<KafkaReceiveRequest, Void> receiveInstrumenter =
         new KafkaInstrumenterFactory(GlobalOpenTelemetry.get(), instrumentationName)
             .setMessagingReceiveTelemetryEnabled(true)
             .createConsumerReceiveInstrumenter();
     Consumer<String, String> consumer = mock(Consumer.class);
+    ConsumerRecord<String, String> source = receive(receiveInstrumenter, consumer, 10);
+    SinkRecord sinkRecord = sinkRecord(source.topic(), source.partition(), source.offset());
+    RetryingSinkTask task = new RetryingSinkTask(1);
+    KafkaConsumerContext consumerContext = KafkaConsumerContextUtil.get(source);
+    VirtualField<SinkRecord, java.util.function.Consumer<Boolean>> receiveDeliveryField =
+        VirtualField.find(SinkRecord.class, java.util.function.Consumer.class);
+    receiveDeliveryField.set(
+        sinkRecord,
+        KafkaInstrumenterFactory.createDeliveryTracker(
+            GlobalOpenTelemetry.get(), consumerContext, source));
 
-    receive(receiveInstrumenter, consumer, 10).accept(false);
-    receive(receiveInstrumenter, consumer, 10).accept(true);
+    assertThatThrownBy(() -> task.put(singletonList(sinkRecord)))
+        .isInstanceOf(RetriableException.class);
+    receive(receiveInstrumenter, consumer, 10);
 
     assertReceiveMetrics(testing, instrumentationName, "receiveOwnedTopic", null, null, 2, 1, null);
   }
@@ -127,7 +139,7 @@ class KafkaConnectDeliveryTrackerTest {
     return new SinkRecord(topic, partition, null, null, null, null, offset);
   }
 
-  private static java.util.function.Consumer<Boolean> receive(
+  private static ConsumerRecord<String, String> receive(
       Instrumenter<KafkaReceiveRequest, Void> receiveInstrumenter,
       Consumer<String, String> consumer,
       long offset) {
@@ -146,8 +158,8 @@ class KafkaConnectDeliveryTrackerTest {
     KafkaConsumerContext consumerContext =
         KafkaConsumerContextUtil.create(
             KafkaConsumerContextUtil.withReceiveOperation(parentContext), consumer);
-    return KafkaInstrumenterFactory.createDeliveryTracker(
-        GlobalOpenTelemetry.get(), consumerContext, source);
+    KafkaConsumerContextUtil.set(source, consumerContext);
+    return source;
   }
 
   private static class RetryingSinkTask extends SinkTask {
