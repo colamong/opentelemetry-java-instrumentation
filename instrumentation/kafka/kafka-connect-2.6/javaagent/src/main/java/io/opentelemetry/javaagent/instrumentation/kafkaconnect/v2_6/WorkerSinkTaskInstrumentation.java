@@ -36,10 +36,12 @@ class WorkerSinkTaskInstrumentation implements TypeInstrumentation {
     // Instrument the execute method which contains the main polling loop
     transformer.applyAdviceToMethod(named("execute"), getClass().getName() + "$ExecuteAdvice");
     transformer.applyAdviceToMethod(
-        named("convertAndTransformRecord").and(takesArgument(0, ConsumerRecord.class)),
+        named("convertAndTransformRecord")
+            .and(takesArgument(0, named("org.apache.kafka.clients.consumer.ConsumerRecord"))),
         getClass().getName() + "$ConvertAndTransformRecordArgumentZeroAdvice");
     transformer.applyAdviceToMethod(
-        named("convertAndTransformRecord").and(takesArgument(1, ConsumerRecord.class)),
+        named("convertAndTransformRecord")
+            .and(takesArgument(1, named("org.apache.kafka.clients.consumer.ConsumerRecord"))),
         getClass().getName() + "$ConvertAndTransformRecordArgumentOneAdvice");
   }
 
