@@ -6,6 +6,7 @@
 package io.opentelemetry.javaagent.instrumentation.kafkaconnect.v2_6;
 
 import static net.bytebuddy.matcher.ElementMatchers.named;
+import static net.bytebuddy.matcher.ElementMatchers.takesArgument;
 
 import io.opentelemetry.javaagent.bootstrap.kafka.KafkaClientsConsumerProcessTracing;
 import io.opentelemetry.javaagent.extension.instrumentation.TypeInstrumentation;
@@ -35,8 +36,11 @@ class WorkerSinkTaskInstrumentation implements TypeInstrumentation {
     // Instrument the execute method which contains the main polling loop
     transformer.applyAdviceToMethod(named("execute"), getClass().getName() + "$ExecuteAdvice");
     transformer.applyAdviceToMethod(
-        named("convertAndTransformRecord"),
-        getClass().getName() + "$ConvertAndTransformRecordAdvice");
+        named("convertAndTransformRecord").and(takesArgument(0, ConsumerRecord.class)),
+        getClass().getName() + "$ConvertAndTransformRecordArgumentZeroAdvice");
+    transformer.applyAdviceToMethod(
+        named("convertAndTransformRecord").and(takesArgument(1, ConsumerRecord.class)),
+        getClass().getName() + "$ConvertAndTransformRecordArgumentOneAdvice");
   }
 
   // This advice suppresses the CONSUMER spans created by the kafka-clients instrumentation
@@ -55,20 +59,27 @@ class WorkerSinkTaskInstrumentation implements TypeInstrumentation {
   }
 
   @SuppressWarnings("unused")
-  public static class ConvertAndTransformRecordAdvice {
+  public static class ConvertAndTransformRecordArgumentZeroAdvice {
 
     @Advice.OnMethodExit(suppress = Throwable.class, inline = false)
     public static void onExit(
-        @Advice.AllArguments Object[] arguments,
+        @Advice.Argument(0) ConsumerRecord<?, ?> source,
         @Advice.Return @Nullable SinkRecord transformedRecord) {
-      if (transformedRecord == null) {
-        return;
+      if (transformedRecord != null) {
+        KafkaConnectTask.copyReceiveOperation(source, transformedRecord);
       }
-      for (Object argument : arguments) {
-        if (argument instanceof ConsumerRecord) {
-          KafkaConnectTask.copyReceiveOperation((ConsumerRecord<?, ?>) argument, transformedRecord);
-          return;
-        }
+    }
+  }
+
+  @SuppressWarnings("unused")
+  public static class ConvertAndTransformRecordArgumentOneAdvice {
+
+    @Advice.OnMethodExit(suppress = Throwable.class, inline = false)
+    public static void onExit(
+        @Advice.Argument(1) ConsumerRecord<?, ?> source,
+        @Advice.Return @Nullable SinkRecord transformedRecord) {
+      if (transformedRecord != null) {
+        KafkaConnectTask.copyReceiveOperation(source, transformedRecord);
       }
     }
   }
