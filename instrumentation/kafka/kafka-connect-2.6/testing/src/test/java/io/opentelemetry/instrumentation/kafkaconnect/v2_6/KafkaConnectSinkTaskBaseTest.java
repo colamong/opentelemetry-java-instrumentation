@@ -190,7 +190,7 @@ abstract class KafkaConnectSinkTaskBaseTest implements TelemetryRetrieverProvide
                             && !(trace.size() == 1
                                 && trace.get(0).getName().equals("GET /connectors")),
                     Comparator.comparingLong(
-                        trace ->
+                        (List<SpanData> trace) ->
                             trace.stream().mapToLong(SpanData::getStartEpochNanos).min().orElse(0)),
                     assertions));
   }

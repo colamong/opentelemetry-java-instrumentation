@@ -17,7 +17,6 @@ import static org.mockito.Mockito.mock;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.instrumentation.api.instrumenter.Instrumenter;
-import io.opentelemetry.instrumentation.api.util.VirtualField;
 import io.opentelemetry.instrumentation.kafkaclients.common.v0_11.internal.KafkaConsumerContext;
 import io.opentelemetry.instrumentation.kafkaclients.common.v0_11.internal.KafkaConsumerContextUtil;
 import io.opentelemetry.instrumentation.kafkaclients.common.v0_11.internal.KafkaInstrumenterFactory;
@@ -105,9 +104,7 @@ class KafkaConnectDeliveryTrackerTest {
     SinkRecord sinkRecord = sinkRecord(source.topic(), source.partition(), source.offset());
     RetryingSinkTask task = new RetryingSinkTask(1);
     KafkaConsumerContext consumerContext = KafkaConsumerContextUtil.get(source);
-    VirtualField<SinkRecord, java.util.function.Consumer<Boolean>> receiveDeliveryField =
-        VirtualField.find(SinkRecord.class, java.util.function.Consumer.class);
-    receiveDeliveryField.set(
+    setReceiveDeliveryTracker(
         sinkRecord,
         KafkaInstrumenterFactory.createDeliveryTracker(
             GlobalOpenTelemetry.get(), consumerContext, source));
@@ -160,6 +157,27 @@ class KafkaConnectDeliveryTrackerTest {
             KafkaConsumerContextUtil.withReceiveOperation(parentContext), consumer);
     KafkaConsumerContextUtil.set(source, consumerContext);
     return source;
+  }
+
+  private static void setReceiveDeliveryTracker(
+      SinkRecord sinkRecord, java.util.function.Consumer<Boolean> deliveryTracker) {
+    String fieldSuffix =
+        SinkRecord.class.getName().replace('.', '$')
+            + "$"
+            + java.util.function.Consumer.class.getName().replace('.', '$');
+    try {
+      // Test classes are not rewritten to use the javaagent's field-backed VirtualField.
+      Class<?> accessor =
+          Class.forName(
+              "io.opentelemetry.javaagent.bootstrap.field.VirtualFieldAccessor$" + fieldSuffix,
+              false,
+              SinkRecord.class.getClassLoader());
+      accessor
+          .getMethod("__set__opentelemetryVirtualField$" + fieldSuffix, Object.class)
+          .invoke(sinkRecord, deliveryTracker);
+    } catch (ReflectiveOperationException e) {
+      throw new LinkageError("Could not set the receive delivery tracker", e);
+    }
   }
 
   private static class RetryingSinkTask extends SinkTask {
