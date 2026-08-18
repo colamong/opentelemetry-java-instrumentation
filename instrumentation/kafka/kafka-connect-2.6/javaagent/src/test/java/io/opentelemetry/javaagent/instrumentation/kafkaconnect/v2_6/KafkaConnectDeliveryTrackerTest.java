@@ -154,7 +154,7 @@ class KafkaConnectDeliveryTrackerTest {
 
     KafkaConsumerContext consumerContext =
         KafkaConsumerContextUtil.create(
-            KafkaConsumerContextUtil.withReceiveOperation(parentContext), consumer);
+            KafkaConsumerContextUtil.withReceiveOperation(parentContext, true), consumer);
     KafkaConsumerContextUtil.set(source, consumerContext);
     return source;
   }
