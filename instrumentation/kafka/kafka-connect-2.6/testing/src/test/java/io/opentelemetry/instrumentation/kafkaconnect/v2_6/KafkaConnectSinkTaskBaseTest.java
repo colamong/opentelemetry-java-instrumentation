@@ -29,6 +29,7 @@ import static io.restassured.RestAssured.given;
 import static java.lang.String.format;
 import static java.time.temporal.ChronoUnit.MINUTES;
 import static java.util.Arrays.asList;
+import static java.util.stream.Collectors.toList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
@@ -46,9 +47,11 @@ import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
 import io.opentelemetry.instrumentation.kafkaclients.v2_6.KafkaTelemetry;
 import io.opentelemetry.instrumentation.test.utils.PortUtils;
 import io.opentelemetry.instrumentation.testing.junit.InstrumentationExtension;
+import io.opentelemetry.instrumentation.testing.util.TelemetryDataUtil;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.testing.assertj.AttributeAssertion;
 import io.opentelemetry.sdk.testing.assertj.TraceAssert;
+import io.opentelemetry.sdk.testing.assertj.TracesAssert;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.data.LinkData;
 import io.opentelemetry.sdk.trace.data.SpanData;
@@ -177,22 +180,28 @@ abstract class KafkaConnectSinkTaskBaseTest implements TelemetryRetrieverProvide
     await()
         .atMost(Duration.ofSeconds(60))
         .untilAsserted(
-            () ->
-                testing.waitAndAssertSortedTraces(
-                    trace ->
-                        !(emitStableMessagingSemconv()
-                                && trace.size() == 1
-                                && trace.get(0).getKind() == SpanKind.CLIENT
-                                && (trace.get(0).getName().equals("poll")
-                                    || trace.get(0).getName().startsWith("poll ")))
-                            && trace.stream()
-                                .noneMatch(span -> span.getName().contains("kafka-connect-status"))
-                            && !(trace.size() == 1
-                                && trace.get(0).getName().equals("GET /connectors")),
-                    Comparator.comparingLong(
-                        (List<SpanData> trace) ->
-                            trace.stream().mapToLong(SpanData::getStartEpochNanos).min().orElse(0)),
-                    assertions));
+            () -> {
+              List<List<SpanData>> relevantTraces =
+                  TelemetryDataUtil.groupTraces(testing.spans()).stream()
+                      .filter(
+                          trace ->
+                              !(emitStableMessagingSemconv()
+                                      && trace.size() == 1
+                                      && trace.get(0).getKind() == SpanKind.CLIENT
+                                      && (trace.get(0).getName().equals("poll")
+                                          || trace.get(0).getName().startsWith("poll ")))
+                                  && trace.stream()
+                                      .noneMatch(
+                                          span -> span.getName().contains("kafka-connect-status"))
+                                  && !(trace.size() == 1
+                                      && trace.get(0).getName().equals("GET /connectors")))
+                      .collect(toList());
+              relevantTraces.sort(
+                  Comparator.comparingLong(
+                      (List<SpanData> trace) ->
+                          trace.stream().mapToLong(SpanData::getStartEpochNanos).min().orElse(0)));
+              TracesAssert.assertThat(relevantTraces).hasTracesSatisfyingExactly(assertions);
+            });
   }
 
   protected final void waitAndAssertMultiTopicTraces(
