@@ -28,7 +28,6 @@ import static io.opentelemetry.semconv.incubating.ThreadIncubatingAttributes.THR
 import static io.restassured.RestAssured.given;
 import static java.lang.String.format;
 import static java.time.temporal.ChronoUnit.MINUTES;
-import static java.util.Arrays.asList;
 import static java.util.stream.Collectors.toList;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
