@@ -347,19 +347,19 @@ abstract class KafkaConnectSinkTaskBaseTest implements TelemetryRetrieverProvide
   protected void assertSingleMessageMetrics(String destination) {
     if (RECEIVE_TELEMETRY_ENABLED) {
       assertProcessMetrics(
-          testing, "io.opentelemetry.kafka-connect-2.6", destination, null, null, 1, null);
+          testing, "io.opentelemetry.kafka-connect-2.6", destination, null, "0", 1, null);
       assertReceiveMetrics(
           testing,
           "io.opentelemetry.kafka-clients-0.11",
           destination,
           "connect-" + getConnectorName(),
-          null,
+          "0",
           1,
           1,
           null);
     } else {
       assertProcessMetricsWithConsumedMessages(
-          testing, "io.opentelemetry.kafka-connect-2.6", destination, null, null, 1, 1, null);
+          testing, "io.opentelemetry.kafka-connect-2.6", destination, null, "0", 1, 1, null);
     }
   }
 
