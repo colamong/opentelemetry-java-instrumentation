@@ -210,7 +210,7 @@ abstract class KafkaConnectSinkTaskBaseTest implements TelemetryRetrieverProvide
         .atMost(Duration.ofSeconds(60))
         .untilAsserted(
             () -> {
-              List<List<SpanData>> traces = groupTraces(testing.spans());
+              List<List<SpanData>> traces = TelemetryDataUtil.groupTraces(testing.spans());
               List<List<SpanData>> producerTraces = new ArrayList<>();
               for (List<SpanData> trace : traces) {
                 if (trace.get(0).getName().equals("parent")) {
