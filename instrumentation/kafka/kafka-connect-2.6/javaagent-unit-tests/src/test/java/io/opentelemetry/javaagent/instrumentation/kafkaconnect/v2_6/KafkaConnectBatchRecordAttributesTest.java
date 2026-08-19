@@ -30,7 +30,7 @@ class KafkaConnectBatchRecordAttributesTest {
         KafkaConnectBatchRecordAttributes.create(records);
 
     // the destination is emitted by MessagingAttributesExtractor, not by the class under test
-    assertThat(new KafkaConnectTask(records).getDestinationName()).isEqualTo("topic");
+    assertThat(new KafkaConnectTask(records, new Object()).getDestinationName()).isEqualTo("topic");
     assertThat(commonAttributes(attributes))
         .isEqualTo(Attributes.builder().put(MESSAGING_DESTINATION_PARTITION_ID, "1").build());
     // the offset and the message key stay on the links even though they are the same for every
@@ -60,7 +60,7 @@ class KafkaConnectBatchRecordAttributesTest {
     KafkaConnectBatchRecordAttributes attributes =
         KafkaConnectBatchRecordAttributes.create(records);
 
-    assertThat(new KafkaConnectTask(records).getDestinationName()).isNull();
+    assertThat(new KafkaConnectTask(records, new Object()).getDestinationName()).isNull();
     assertThat(commonAttributes(attributes)).isEqualTo(Attributes.empty());
     assertThat(linkAttributes(attributes, records))
         .containsExactly(
@@ -77,7 +77,7 @@ class KafkaConnectBatchRecordAttributesTest {
 
     // the batch spans two topics, so no destination name is emitted on the batch span, which would
     // leave the partition id orphaned there
-    assertThat(new KafkaConnectTask(records).getDestinationName()).isNull();
+    assertThat(new KafkaConnectTask(records, new Object()).getDestinationName()).isNull();
     assertThat(commonAttributes(attributes)).isEqualTo(Attributes.empty());
     assertThat(linkAttributes(attributes, records))
         .containsExactly(
@@ -91,7 +91,7 @@ class KafkaConnectBatchRecordAttributesTest {
     KafkaConnectBatchRecordAttributes attributes =
         KafkaConnectBatchRecordAttributes.create(records);
 
-    assertThat(new KafkaConnectTask(records).getDestinationName()).isEqualTo("topic");
+    assertThat(new KafkaConnectTask(records, new Object()).getDestinationName()).isEqualTo("topic");
     assertThat(commonAttributes(attributes)).isEqualTo(Attributes.empty());
     assertThat(linkAttributes(attributes, records))
         .containsExactly(
