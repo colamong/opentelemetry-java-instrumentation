@@ -256,7 +256,6 @@ class KafkaStreamsDefaultTest extends KafkaStreamsBaseTest {
           "0",
           1,
           1,
-          1,
           null);
       assertTotalConsumedMessages(testing, "io.opentelemetry.kafka-clients-0.11", 2);
       return;
@@ -398,7 +397,6 @@ class KafkaStreamsDefaultTest extends KafkaStreamsBaseTest {
         STREAM_PENDING,
         testLatestDeps() ? "test-application" : null,
         "0",
-        1,
         1,
         1,
         null);
