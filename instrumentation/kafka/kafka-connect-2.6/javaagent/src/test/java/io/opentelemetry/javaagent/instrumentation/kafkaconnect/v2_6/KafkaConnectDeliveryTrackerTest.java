@@ -130,6 +130,22 @@ class KafkaConnectDeliveryTrackerTest {
     assertTotalConsumedMessages(testing, "io.opentelemetry.kafka-connect-2.6", 4);
   }
 
+  @Test
+  void countsLargeFailedBatchRetryOnce() {
+    List<SinkRecord> records = new ArrayList<>();
+    for (int i = 0; i < 1100; i++) {
+      records.add(sinkRecord("overflowTopic", 0, i));
+    }
+    RetryingSinkTask task = new RetryingSinkTask(1);
+
+    assertThatThrownBy(() -> task.put(new ArrayList<>(records)))
+        .isInstanceOf(RetriableException.class);
+    task.put(new ArrayList<>(records));
+
+    // all 1100 records should be counted exactly once: the retry does not add to the count
+    assertTotalConsumedMessages(testing, "io.opentelemetry.kafka-connect-2.6", 1100);
+  }
+
   private static SinkRecord sinkRecord(String topic, int partition, long offset) {
     return new SinkRecord(topic, partition, null, null, null, null, offset);
   }
