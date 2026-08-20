@@ -7,7 +7,6 @@ package io.opentelemetry.javaagent.instrumentation.kafkaconnect.v2_6;
 
 import static java.util.stream.Collectors.toCollection;
 
-import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.instrumentation.api.util.VirtualField;
 import io.opentelemetry.instrumentation.kafkaclients.common.v0_11.internal.KafkaConsumerContext;
@@ -61,9 +60,7 @@ public class KafkaConnectTask {
     Context context = consumerContext.getContext();
     if (context != null && KafkaConsumerContextUtil.hasReceiveOperation(context)) {
       RECEIVE_DELIVERY_FIELD.set(
-          target,
-          KafkaInstrumenterFactory.createDeliveryTracker(
-              GlobalOpenTelemetry.get(), consumerContext, source));
+          target, KafkaInstrumenterFactory.createDeliveryTracker(consumerContext, source));
     }
   }
 

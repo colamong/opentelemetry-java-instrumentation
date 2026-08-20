@@ -105,9 +105,7 @@ class KafkaConnectDeliveryTrackerTest {
     RetryingSinkTask task = new RetryingSinkTask(1);
     KafkaConsumerContext consumerContext = KafkaConsumerContextUtil.get(source);
     setReceiveDeliveryTracker(
-        sinkRecord,
-        KafkaInstrumenterFactory.createDeliveryTracker(
-            GlobalOpenTelemetry.get(), consumerContext, source));
+        sinkRecord, KafkaInstrumenterFactory.createDeliveryTracker(consumerContext, source));
 
     assertThatThrownBy(() -> task.put(singletonList(sinkRecord)))
         .isInstanceOf(RetriableException.class);

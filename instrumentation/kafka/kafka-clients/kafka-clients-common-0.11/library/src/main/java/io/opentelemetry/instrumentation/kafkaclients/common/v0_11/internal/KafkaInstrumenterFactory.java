@@ -395,9 +395,7 @@ public final class KafkaInstrumenterFactory {
    * operation reads.
    */
   public static Consumer<Boolean> createDeliveryTracker(
-      OpenTelemetry openTelemetry,
-      KafkaConsumerContext consumerContext,
-      ConsumerRecord<?, ?> record) {
+      KafkaConsumerContext consumerContext, ConsumerRecord<?, ?> record) {
     DeliveryTracker deliveryTracker = consumerContext.getDeliveryTracker();
     if (deliveryTracker == null) {
       return ignored -> {};
