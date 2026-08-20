@@ -71,6 +71,7 @@ class SinkTaskInstrumentation implements TypeInstrumentation {
         Context parentContext = Context.current();
 
         KafkaConnectTask task = new KafkaConnectTask(records, sinkTask);
+        task.initBatchReceiveTrackers();
         if (!instrumenter().shouldStart(parentContext, task)) {
           return null;
         }

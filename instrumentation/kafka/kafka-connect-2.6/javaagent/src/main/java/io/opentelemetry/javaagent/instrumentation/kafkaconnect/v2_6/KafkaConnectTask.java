@@ -14,8 +14,11 @@ import io.opentelemetry.instrumentation.kafkaclients.common.v0_11.internal.Kafka
 import io.opentelemetry.instrumentation.kafkaclients.common.v0_11.internal.KafkaInstrumenterFactory;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 import javax.annotation.Nullable;
@@ -28,6 +31,9 @@ public class KafkaConnectTask {
   // classloader, which has its own copies of the instrumentation helper classes.
   private static final VirtualField<SinkRecord, Consumer<Boolean>> RECEIVE_DELIVERY_FIELD =
       VirtualField.find(SinkRecord.class, Consumer.class);
+  // Object is used as the field type for the same reason.
+  private static final VirtualField<SinkRecord, Object> SOURCE_RECORD_FIELD =
+      VirtualField.find(SinkRecord.class, Object.class);
 
   private final Collection<SinkRecord> records;
   @Nullable private KafkaConnectBatchRecordAttributes batchRecordAttributes;
@@ -59,8 +65,39 @@ public class KafkaConnectTask {
     KafkaConsumerContext consumerContext = KafkaConsumerContextUtil.get(source);
     Context context = consumerContext.getContext();
     if (context != null && KafkaConsumerContextUtil.hasReceiveOperation(context)) {
-      RECEIVE_DELIVERY_FIELD.set(
-          target, KafkaInstrumenterFactory.createDeliveryTracker(consumerContext, source));
+      SOURCE_RECORD_FIELD.set(target, source);
+    }
+  }
+
+  void initBatchReceiveTrackers() {
+    // Group source records by receive Context so each failed put creates one tracked operation
+    // per consumer, preventing large batches from overflowing the tracker's pending-failure
+    // capacity.
+    IdentityHashMap<Context, List<ConsumerRecord<?, ?>>> byContext = new IdentityHashMap<>();
+    for (SinkRecord record : records) {
+      ConsumerRecord<?, ?> source = (ConsumerRecord<?, ?>) SOURCE_RECORD_FIELD.get(record);
+      if (source != null) {
+        Context key = KafkaConsumerContextUtil.get(source).getContext();
+        byContext.computeIfAbsent(key, k -> new ArrayList<>()).add(source);
+      }
+    }
+
+    // Build one batch callback per Context group
+    IdentityHashMap<Context, Consumer<Boolean>> callbackByContext = new IdentityHashMap<>();
+    for (Map.Entry<Context, List<ConsumerRecord<?, ?>>> entry : byContext.entrySet()) {
+      callbackByContext.put(
+          entry.getKey(),
+          KafkaInstrumenterFactory.createDeliveryTracker(
+              KafkaConsumerContextUtil.get(entry.getValue().get(0)), entry.getValue()));
+    }
+
+    // Set one callback per sink record
+    for (SinkRecord record : records) {
+      ConsumerRecord<?, ?> source = (ConsumerRecord<?, ?>) SOURCE_RECORD_FIELD.get(record);
+      if (source != null) {
+        Context key = KafkaConsumerContextUtil.get(source).getContext();
+        RECEIVE_DELIVERY_FIELD.set(record, callbackByContext.get(key));
+      }
     }
   }
 
@@ -77,10 +114,12 @@ public class KafkaConnectTask {
   }
 
   List<Consumer<Boolean>> getReceiveDeliveryTrackers() {
+    // Deduplicate by identity: all records in a batch share one callback instance
+    Set<Consumer<Boolean>> seen = Collections.newSetFromMap(new IdentityHashMap<>());
     List<Consumer<Boolean>> trackers = new ArrayList<>();
     for (SinkRecord record : records) {
       Consumer<Boolean> tracker = RECEIVE_DELIVERY_FIELD.get(record);
-      if (tracker != null) {
+      if (tracker != null && seen.add(tracker)) {
         trackers.add(tracker);
       }
     }

@@ -146,6 +146,63 @@ class KafkaConnectDeliveryTrackerTest {
     assertTotalConsumedMessages(testing, "io.opentelemetry.kafka-connect-2.6", 1100);
   }
 
+  @Test
+  @SuppressWarnings("unchecked")
+  void receiveOperationCountsLargeFailedBatchRetryOnce() {
+    String instrumentationName = "test-kafka-connect-receive-large";
+    Instrumenter<KafkaReceiveRequest, Void> receiveInstrumenter =
+        new KafkaInstrumenterFactory(GlobalOpenTelemetry.get(), instrumentationName)
+            .setMessagingReceiveTelemetryEnabled(true)
+            .createConsumerReceiveInstrumenter();
+    Consumer<String, String> consumer = mock(Consumer.class);
+
+    // First receive: 1100 records, none pending-failed → 1100 counted
+    List<ConsumerRecord<String, String>> sources =
+        receiveMultiple(receiveInstrumenter, consumer, 1100);
+    List<SinkRecord> sinkRecords = new ArrayList<>();
+    for (ConsumerRecord<String, String> source : sources) {
+      SinkRecord sink = sinkRecord(source.topic(), source.partition(), source.offset());
+      KafkaConnectTask.copyReceiveOperation(source, sink);
+      sinkRecords.add(sink);
+    }
+
+    RetryingSinkTask task = new RetryingSinkTask(1);
+    assertThatThrownBy(() -> task.put(new ArrayList<>(sinkRecords)))
+        .isInstanceOf(RetriableException.class);
+
+    // Re-receive same records: all pending-failed → 0 counted
+    receiveMultiple(receiveInstrumenter, consumer, 1100);
+
+    assertReceiveMetrics(
+        testing, instrumentationName, "receiveOwnedLargeTopic", null, null, 2, 1100, null);
+  }
+
+  private static List<ConsumerRecord<String, String>> receiveMultiple(
+      Instrumenter<KafkaReceiveRequest, Void> receiveInstrumenter,
+      Consumer<String, String> consumer,
+      int count) {
+    String topic = "receiveOwnedLargeTopic";
+    int partition = 0;
+    List<ConsumerRecord<String, String>> sourceList = new ArrayList<>();
+    for (int i = 0; i < count; i++) {
+      sourceList.add(new ConsumerRecord<>(topic, partition, i, "key", "value"));
+    }
+    ConsumerRecords<String, String> records =
+        new ConsumerRecords<>(singletonMap(new TopicPartition(topic, partition), sourceList));
+    KafkaReceiveRequest request = KafkaReceiveRequest.create(records, consumer);
+    Context parentContext = Context.root();
+    Context receiveContext = receiveInstrumenter.start(parentContext, request);
+    receiveInstrumenter.end(receiveContext, request, null, null);
+
+    KafkaConsumerContext consumerContext =
+        KafkaConsumerContextUtil.create(
+            KafkaConsumerContextUtil.withReceiveOperation(parentContext, true), consumer);
+    for (ConsumerRecord<String, String> source : sourceList) {
+      KafkaConsumerContextUtil.set(source, consumerContext);
+    }
+    return sourceList;
+  }
+
   private static SinkRecord sinkRecord(String topic, int partition, long offset) {
     return new SinkRecord(topic, partition, null, null, null, null, offset);
   }

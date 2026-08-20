@@ -405,6 +405,24 @@ public final class KafkaInstrumenterFactory {
   }
 
   /**
+   * Like {@link #createDeliveryTracker(KafkaConsumerContext, ConsumerRecord)}, but tracks all
+   * records as one operation so batch size does not affect the tracker capacity.
+   */
+  public static Consumer<Boolean> createDeliveryTracker(
+      KafkaConsumerContext consumerContext, List<ConsumerRecord<?, ?>> records) {
+    DeliveryTracker deliveryTracker = consumerContext.getDeliveryTracker();
+    if (deliveryTracker == null) {
+      return ignored -> {};
+    }
+    List<DeliveryTracker.DeliveryKey> keys = new ArrayList<>(records.size());
+    for (ConsumerRecord<?, ?> record : records) {
+      keys.add(deliveryKey(record));
+    }
+    DeliveryTracker.DeliveryState state = deliveryTracker.start(keys);
+    return successful -> endDeliveryTracking(state, successful);
+  }
+
+  /**
    * A delivery with no tracker is always counted, because without a tracker a redelivery cannot be
    * recognized.
    */
